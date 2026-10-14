@@ -42,8 +42,16 @@ func _ready() -> void:
 	var levels := UI.ghost_button("LEVELS")
 	levels.custom_minimum_size = Vector2(440, 0)
 	levels.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	levels.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/LevelSelect.tscn"))
+	levels.pressed.connect(func():
+		Levels.current_mode = ""
+		get_tree().change_scene_to_file("res://scenes/LevelSelect.tscn"))
 	root.add_child(levels)
+
+	var lab := UI.ghost_button("PROTOTYPES")
+	lab.custom_minimum_size = Vector2(440, 0)
+	lab.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	lab.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/Lab.tscn"))
+	root.add_child(lab)
 
 	# settings row
 	var row := HBoxContainer.new()
@@ -60,12 +68,13 @@ func _ready() -> void:
 	root.add_child(UI.label("%d / %d solved" % [Save.data["completed"].size(), Levels.count()], Palette.FONT_SMALL, Palette.TEXT_DIM))
 
 func _on_play() -> void:
-	# resume at the furthest level that is actually unlocked (respects star gates)
+	# resume at the furthest level that is actually unlocked (linear progression)
 	var lvl := 0
 	for i in range(Levels.count()):
-		if Levels.is_unlocked(i):
+		if Save.is_unlocked(i):
 			lvl = i
 	Levels.current_level = lvl
+	Levels.current_mode = ""
 	get_tree().change_scene_to_file("res://scenes/Game.tscn")
 
 func _sfx_label() -> String:

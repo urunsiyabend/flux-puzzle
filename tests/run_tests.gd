@@ -25,11 +25,14 @@ func _initialize() -> void:
 	_test_holes()
 	_test_locked()
 	_test_move_economy()
-	_test_budget()
 	_test_hint()
 	_test_worlds()
 	_test_levels()
 	_test_progression()
+	_test_rules()
+	_test_proto_net()
+	_test_proto_lamps()
+	_test_proto_linked()
 	print("== done: %d passed, %d failed ==" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -203,28 +206,6 @@ func _test_move_economy() -> void:
 		# solving the generated scramble by its own moves is possible in `opt`
 		_ok(_home(g).is_solved(), "home is a valid solution (seed %d)" % s)
 
-func _test_budget() -> void:
-	var L = preload("res://autoload/Levels.gd").new()
-	L._build_catalogue()
-	# World 1 is frictionless (no fail), later worlds can fail
-	_ok(L.level_no_fail(0), "world 1 is no-fail")
-	_ok(not L.level_no_fail(6), "world 2 can fail")
-	_ok(L.budget_for(0) >= 99999, "world 1 budget is effectively unlimited")
-	# fail-world budgets are finite and always allow a 3-star (>= par) clear
-	for lvl in [6, 12, 18]:
-		var p := L.par_for(lvl)
-		var bud := L.budget_for(lvl)
-		_ok(bud >= p, "budget allows an optimal clear (level %d: par %d, budget %d)" % [lvl + 1, p, bud])
-		_ok(bud < 99999, "fail-world budget is finite (level %d)" % [lvl + 1])
-	# multipliers tighten after world 1
-	var mult = L.WORLD_BUDGET_MULT
-	_ok(mult.size() == 4, "four budget multipliers")
-	_ok(mult[1] > mult[2] and mult[2] > mult[3], "budget tightens world over world")
-	# star thresholds
-	_ok(L.stars_for(0, 10) == 3, "par-or-better earns 3 stars")
-	_ok(L.stars_for(15, 10) == 2, "within 1.5x par earns 2 stars")
-	_ok(L.stars_for(16, 10) == 1, "beyond 1.5x par earns 1 star")
-
 func _test_hint() -> void:
 	# 3x1 line, all at home -> solved -> no hint
 	var b := Board.new(3, 1)
@@ -251,13 +232,9 @@ func _test_worlds() -> void:
 	_ok(L.world_of(6) == 1, "level 7 is world 1")
 	_ok(L.world_of(23) == 3, "level 24 is world 3")
 	_ok(L.WORLD_NAMES.size() == 4, "four world names")
-	var gates = L.WORLD_STAR_GATES
-	_ok(gates[0] == 0, "world 0 has no gate")
-	var increasing := true
-	for i in range(1, gates.size()):
-		if gates[i] <= gates[i - 1]:
-			increasing = false
-	_ok(increasing, "world star gates strictly increase")
+	_ok(L.WORLD_INTROS.size() == L.WORLD_NAMES.size(), "every world has a one-line intro")
+	_ok(L.is_world_start(0) and L.is_world_start(6), "levels 1 and 7 open a world")
+	_ok(not L.is_world_start(5), "level 6 does not open a world")
 	# every catalogue level still solvable with its mechanics
 	var all_ok := true
 	for i in range(L.count()):
@@ -299,9 +276,6 @@ func _test_levels() -> void:
 		if not home.is_solved():
 			all_solvable = false
 	_ok(all_solvable, "every catalogue level is solvable")
-	# star thresholds
-	_ok(L.stars_for(0, 10) == 3, "par-or-better earns 3 stars")
-	_ok(L.stars_for(100, 10) == 1, "far over par earns 1 star")
 
 func _test_progression() -> void:
 	var S = preload("res://autoload/Save.gd").new()
@@ -315,3 +289,83 @@ func _test_progression() -> void:
 	_ok(S.best_moves(0) == 12, "best moves keeps the minimum")
 	S.complete_level(0, 8)
 	_ok(S.best_moves(0) == 8, "best moves updates to a better score")
+
+func _test_rules() -> void:
+	# wrap: stepping off an edge lands on the opposite side
+	var b := Board.new(3, 3)
+	_ok(b.step(0, Puzzle.W) == -1, "bounded board: no neighbour off the edge")
+	b.wrap = true
+	_ok(b.step(0, Puzzle.W) == 2, "wrap: west of col 0 is the last column")
+	_ok(b.step(0, Puzzle.N) == 6, "wrap: north of row 0 is the last row")
+	# NET rule: a closed 2x2 ring is matched but not a valid network
+	var ring := Board.new(2, 2)
+	ring.base[0] = Puzzle.E | Puzzle.S
+	ring.base[1] = Puzzle.W | Puzzle.S
+	ring.base[2] = Puzzle.N | Puzzle.E
+	ring.base[3] = Puzzle.N | Puzzle.W
+	_ok(ring.is_solved(), "ring satisfies the classic matching rule")
+	ring.rule = Board.RULE_NET
+	_ok(not ring.is_solved(), "ring fails the NET rule (closed loop)")
+	var loops := ring.loop_cells()
+	_ok(loops[0] == 1 and loops[3] == 1, "loop cells are reported for feedback")
+	# breaking the ring into a path makes a valid tree
+	ring.base[1] = Puzzle.W
+	ring.base[3] = Puzzle.W
+	ring.base[2] = Puzzle.N | Puzzle.E
+	_ok(ring.is_solved(), "loop-free connected path passes the NET rule")
+	_ok(ring.loop_cells()[0] == 0, "no loop cells on a tree")
+
+func _test_proto_net() -> void:
+	var L = preload("res://autoload/Levels.gd").new()
+	L._build_catalogue()
+	for lvl in range(L.proto_count("net")):
+		var b: Board = L.get_proto_board("net", lvl)
+		_ok(b.wrap and b.rule == Board.RULE_NET, "net %d: wrapping NET board" % [lvl + 1])
+		_ok(not b.is_solved(), "net %d: starts unsolved" % [lvl + 1])
+		_ok(_home(b).is_solved(), "net %d: home orientation solves it" % [lvl + 1])
+		_ok(Generator.count_solutions(b, 2) == 1, "net %d: unique solution" % [lvl + 1])
+		_ok(Generator.local_solved_ratio(b) < 1.0, "net %d: local deduction alone cannot finish" % [lvl + 1])
+
+func _test_proto_lamps() -> void:
+	var L = preload("res://autoload/Levels.gd").new()
+	L._build_catalogue()
+	for lvl in range(L.proto_count("lamps")):
+		var b: Board = L.get_proto_board("lamps", lvl)
+		var lamps := 0
+		var decoys := 0
+		for i in range(b.lamp.size()):
+			lamps += b.lamp[i]
+			decoys += 1 - b.need[i]
+		_ok(lamps >= 1, "lamps %d: has lamps" % [lvl + 1])
+		_ok(decoys > 0, "lamps %d: has decoy tiles" % [lvl + 1])
+		_ok(not b.is_solved(), "lamps %d: starts unsolved" % [lvl + 1])
+		var h := Board.from_dict(b.to_dict())
+		for i in range(h.rot.size()):
+			if h.need[i] == 1:
+				h.rot[i] = 0
+		_ok(h.is_solved(), "lamps %d: the route tiles at home power every lamp" % [lvl + 1])
+
+func _test_proto_linked() -> void:
+	var L = preload("res://autoload/Levels.gd").new()
+	L._build_catalogue()
+	for lvl in range(L.proto_count("linked")):
+		var b: Board = L.get_proto_board("linked", lvl)
+		_ok(b.has_links(), "linked %d: has chained tiles" % [lvl + 1])
+		var sym := true
+		for i in range(b.links.size()):
+			for j in b.links[i]:
+				if not b.links[j].has(i):
+					sym = false
+		_ok(sym, "linked %d: links are symmetric" % [lvl + 1])
+		_ok(not b.is_solved(), "linked %d: starts unsolved" % [lvl + 1])
+		# tap/untap are exact inverses
+		var before := b.rot.duplicate()
+		b.tap(0)
+		b.untap(0)
+		_ok(b.rot == before, "linked %d: untap restores the board" % [lvl + 1])
+		# replaying the inverse taps solves it, and the hint follows that plan
+		var guard := 0
+		while b.hint_cell() >= 0 and guard < 400:
+			b.tap(b.hint_cell())
+			guard += 1
+		_ok(b.is_solved(), "linked %d: following hints solves the board" % [lvl + 1])

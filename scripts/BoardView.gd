@@ -15,11 +15,12 @@ var source_cell := -1
 var _display_angle: PackedFloat32Array   # animated, radians
 var _target_angle: PackedFloat32Array
 var _energized: PackedByteArray
+var _loops: PackedByteArray                 # NET rule: tiles sitting on a closed loop
 var _animating := false
 var _interactive := true
 
 var move_count := 0
-var _undo: Array = []                      # [{i, prev_rot}]
+var _undo: Array = []                      # tapped cells, newest last
 var _hint_cell := -1
 var _hint_timer := 0.0
 var _win_pulse := 0.0
@@ -56,7 +57,10 @@ func setup(b: Board, rect: Rect2) -> void:
 	_reject_cell = -1
 	_reject_t = 0.0
 	position = Vector2.ZERO
-	_choose_source()
+	if b.source >= 0:
+		source_cell = b.source
+	else:
+		_choose_source()
 	_fit(rect)
 	_recompute_energy()
 	queue_redraw()
@@ -130,13 +134,12 @@ func _reject_locked(i: int) -> void:
 
 func _rotate(i: int, user: bool) -> void:
 	if user:
-		_undo.append({"i": i, "prev_rot": board.rot[i]})
+		_undo.append(i)
 		move_count += 1
-	board.rotate_cell(i)
-	_target_angle[i] += PI / 2.0
+	for j in board.tap(i):
+		_target_angle[j] += PI / 2.0
+		_flash[j] = 1.0
 	_animating = true
-	if i < _flash.size():
-		_flash[i] = 1.0
 	Audio.play("rotate")
 	_recompute_energy()
 	if user:
@@ -148,10 +151,9 @@ func _rotate(i: int, user: bool) -> void:
 func undo() -> void:
 	if _undo.is_empty() or _solved:
 		return
-	var m = _undo.pop_back()
-	var i: int = m["i"]
-	board.rot[i] = m["prev_rot"]
-	_target_angle[i] = board.rot[i] * PI / 2.0
+	var i: int = _undo.pop_back()
+	for j in board.untap(i):
+		_target_angle[j] -= PI / 2.0
 	move_count = max(0, move_count - 1)
 	_animating = true
 	Audio.play("tap")
@@ -173,12 +175,9 @@ func request_hint() -> void:
 	# extends the live circuit (a frontier move, the most useful hint)
 	var pick := -1
 	for i in cands:
-		@warning_ignore("integer_division")
-		var row := i / board.width
-		var col := i % board.width
 		for dir in Puzzle.DIRS:
-			var nc := board.neighbor(row, col, dir)  # (col,row)
-			if board.in_bounds(nc.y, nc.x) and _energized[board.idx(nc.y, nc.x)] == 1:
+			var ni := board.step(i, dir)
+			if ni >= 0 and _energized[ni] == 1:
 				pick = i
 				break
 		if pick >= 0:
@@ -204,27 +203,12 @@ func _win() -> void:
 # --- energy flood from source through mutually-matched connectors ----------
 
 func _recompute_energy() -> void:
-	var n := board.width * board.height
-	_energized = PackedByteArray()
-	_energized.resize(n)
-	if source_cell < 0:
-		return
-	var stack: Array[int] = [source_cell]
-	_energized[source_cell] = 1
-	while not stack.is_empty():
-		var cur: int = stack.pop_back()
-		@warning_ignore("integer_division")
-		var row := cur / board.width
-		var col := cur % board.width
-		var m := board.current_mask(cur)
-		for dir in Puzzle.DIRS:
-			if m & dir:
-				var nc := board.neighbor(row, col, dir)  # (col,row)
-				if board.in_bounds(nc.y, nc.x):
-					var ni := board.idx(nc.y, nc.x)
-					if (board.current_mask(ni) & Puzzle.opposite(dir)) != 0 and _energized[ni] == 0:
-						_energized[ni] = 1
-						stack.append(ni)
+	_energized = board.energized(source_cell)
+	if board.rule == Board.RULE_NET:
+		_loops = board.loop_cells()
+	else:
+		_loops = PackedByteArray()
+		_loops.resize(board.base.size())
 
 # --- animation -------------------------------------------------------------
 
@@ -275,9 +259,39 @@ func _process(delta: float) -> void:
 # --- drawing ---------------------------------------------------------------
 
 func _draw() -> void:
+	if board.wrap:
+		_draw_wrap_frame()
 	for row in range(board.height):
 		for col in range(board.width):
 			_draw_cell(row, col)
+	_draw_links()
+
+# Wrapping boards get a dashed frame so it reads as "the edges continue".
+func _draw_wrap_frame() -> void:
+	var r := Rect2(origin, Vector2(cell * board.width, cell * board.height)).grow(cell * 0.04)
+	var col := Color(Palette.ACCENT.r, Palette.ACCENT.g, Palette.ACCENT.b, 0.45)
+	var corners := [r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)]
+	for k in range(4):
+		draw_dashed_line(corners[k], corners[(k + 1) % 4], col, 4.0, cell * 0.12)
+
+# Chained tiles: a warm rivet across the edge they share.
+func _draw_links() -> void:
+	var warm := Palette.ACCENT_WARM
+	for i in range(board.links.size()):
+		for j in board.links[i]:
+			if j < i:
+				continue
+			@warning_ignore("integer_division")
+			var a := origin + Vector2((i % board.width) + 0.5, (i / board.width) + 0.5) * cell
+			@warning_ignore("integer_division")
+			var b := origin + Vector2((j % board.width) + 0.5, (j / board.width) + 0.5) * cell
+			var mid := (a + b) * 0.5
+			var along := (b - a).normalized()
+			var across := Vector2(-along.y, along.x)
+			draw_line(mid - along * cell * 0.16, mid + along * cell * 0.16, warm, cell * 0.09, true)
+			draw_circle(mid - along * cell * 0.16, cell * 0.06, warm)
+			draw_circle(mid + along * cell * 0.16, cell * 0.06, warm)
+			draw_line(mid - across * cell * 0.02, mid + across * cell * 0.02, Palette.BG_TILE, cell * 0.03)
 
 func _draw_cell(row: int, col: int) -> void:
 	var i := board.idx(row, col)
@@ -295,11 +309,17 @@ func _draw_cell(row: int, col: int) -> void:
 	var inner := Rect2(tl + Vector2(pad, pad), Vector2(cell - 2 * pad, cell - 2 * pad))
 
 	var is_locked := board.is_locked(i)
+	var in_loop := _loops.size() > i and _loops[i] == 1
+	var linked: bool = not board.links[i].is_empty()
 
 	# tile background
 	var bg := Palette.BG_TILE
 	if is_locked:
 		bg = bg.lerp(Palette.ACCENT, 0.1)
+	if linked:
+		bg = bg.lerp(Palette.ACCENT_WARM, 0.08)
+	if in_loop and not _solved:
+		bg = bg.lerp(Palette.DANGER, 0.22)
 	if rejecting:
 		bg = bg.lerp(Palette.DANGER, 0.3)
 	draw_rect(inner, bg, true)
@@ -345,6 +365,15 @@ func _draw_cell(row: int, col: int) -> void:
 		if on:
 			draw_circle(center, cell * 0.18, Color(glow.r, glow.g, glow.b, 0.3))
 		draw_circle(center, cell * 0.06, Palette.BG_TILE if not on else Palette.NODE)
+
+	# lamp: a bulb ring that fills when power reaches it
+	if board.lamp[i] == 1:
+		var warm := Palette.ACCENT_WARM
+		if on:
+			draw_circle(center, cell * 0.3, Color(warm.r, warm.g, warm.b, 0.25))
+			draw_circle(center, cell * 0.17, warm)
+		else:
+			draw_arc(center, cell * 0.2, 0.0, TAU, 32, warm, cell * 0.05, true)
 
 	# lock indicator (a small padlock) for fixed tiles
 	if is_locked:

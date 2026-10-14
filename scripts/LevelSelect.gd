@@ -1,6 +1,6 @@
 extends Control
 
-# Level select, grouped into worlds. Later worlds are gated by total stars.
+# Level select, grouped into worlds. Progression is linear: solve to unlock the next.
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -31,7 +31,7 @@ func _ready() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	header.add_child(title)
-	header.add_child(UI.label("%d★" % Levels.total_stars(), Palette.FONT_H1, Palette.ACCENT_WARM))
+	header.add_child(UI.label("%d / %d" % [Save.data["completed"].size(), Levels.count()], Palette.FONT_BODY, Palette.TEXT_DIM))
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -62,17 +62,13 @@ func _world_header(w: int) -> Control:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 16)
 	var wname: String = Levels.WORLD_NAMES[clampi(w, 0, Levels.WORLD_NAMES.size() - 1)]
-	var unlocked := Levels.world_unlocked(w)
+	var unlocked := Save.is_unlocked(w * Levels.PER_WORLD)
 	var c := Palette.TEXT if unlocked else Palette.TEXT_DIM
 	row.add_child(UI.label("WORLD %d · %s" % [w + 1, wname], Palette.FONT_BODY, c))
-	if not unlocked:
-		var need: int = Levels.gate_for_world(w)
-		var lock := UI.label("🔒 %d★" % need, Palette.FONT_SMALL, Palette.ACCENT_WARM)
-		row.add_child(lock)
 	return row
 
 func _make_chip(level: int) -> Control:
-	var unlocked := Levels.is_unlocked(level)
+	var unlocked := Save.is_unlocked(level)
 	var done := Save.is_completed(level)
 	var b := Button.new()
 	b.focus_mode = Control.FOCUS_NONE
@@ -99,18 +95,13 @@ func _make_chip(level: int) -> Control:
 
 	if unlocked:
 		v.add_child(UI.label(str(level + 1), Palette.FONT_H1, Palette.TEXT))
-		var stars := Levels.best_stars(level) if done else 0
-		v.add_child(UI.label(_star_str(stars), Palette.FONT_SMALL, Palette.ACCENT_WARM if done else Palette.TEXT_DIM))
+		# solved levels glow like a lit circuit node; unsolved ones stay dim
+		v.add_child(UI.label("●" if done else "○", Palette.FONT_SMALL, Palette.WIRE_ON if done else Palette.TEXT_DIM))
 		b.pressed.connect(func():
 			Audio.play("tap")
 			Levels.current_level = level
+			Levels.current_mode = ""
 			get_tree().change_scene_to_file("res://scenes/Game.tscn"))
 	else:
 		v.add_child(UI.label("🔒", Palette.FONT_H1, Palette.TEXT_DIM))
 	return b
-
-func _star_str(n: int) -> String:
-	var s := ""
-	for i in range(3):
-		s += "★" if i < n else "☆"
-	return s

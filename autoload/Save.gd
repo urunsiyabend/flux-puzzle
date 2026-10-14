@@ -10,6 +10,7 @@ var data := {
 	"version": 1,
 	"completed": {},      # level_index (as string) -> best move count
 	"max_unlocked": 0,    # highest level index unlocked (0-based)
+	"proto": {},          # mode -> {level_index: best move count} (prototype lab)
 	"settings": {
 		"sfx": true,
 		"music": true,
@@ -62,6 +63,20 @@ func complete_level(level: int, moves: int) -> void:
 		data["completed"][key] = moves
 	if level + 1 > int(data["max_unlocked"]):
 		data["max_unlocked"] = level + 1
+	save_data()
+
+func proto_completed(mode: String, level: int) -> bool:
+	return data.get("proto", {}).get(mode, {}).has(str(level))
+
+func complete_proto(mode: String, level: int, moves: int) -> void:
+	if not data.has("proto"):
+		data["proto"] = {}
+	if not data["proto"].has(mode):
+		data["proto"][mode] = {}
+	var key := str(level)
+	var rec: Dictionary = data["proto"][mode]
+	if not rec.has(key) or moves < int(rec[key]):
+		rec[key] = moves
 	save_data()
 
 func get_setting(key: String) -> bool:

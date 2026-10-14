@@ -9,12 +9,17 @@ extends Node
 #   World 3 (13-18) : + HOLES (irregular, non-rectangular boards)
 #   World 4 (19-24) : holes + locked + dense loops (mastery)
 #
-# Worlds gate on TOTAL STARS, so the star rating is meaningful: to reach a later
-# world you must go back and earn more stars on earlier levels.
+# Progression is linear: solving a level unlocks the next. Worlds only group
+# levels and pace the introduction of new mechanics.
 
 const PER_WORLD := 6
 const WORLD_NAMES := ["Spark", "Anchor", "Fracture", "Overload"]
-const WORLD_STAR_GATES := [0, 8, 20, 34]   # total stars required to enter world i
+const WORLD_INTROS := [
+	"Tap a tile to turn it",
+	"Locked tiles stay put",
+	"Some boards have holes",
+	"Everything together",
+]
 
 var configs: Array = []
 var current_level := 0
@@ -58,76 +63,71 @@ func world_name(level: int) -> String:
 func tier(level: int) -> int:
 	return clampi(world_of(level) + 1, 1, 3)
 
-func gate_for_world(w: int) -> int:
-	return WORLD_STAR_GATES[clampi(w, 0, WORLD_STAR_GATES.size() - 1)]
+func world_intro(w: int) -> String:
+	return WORLD_INTROS[clampi(w, 0, WORLD_INTROS.size() - 1)]
+
+func is_world_start(level: int) -> bool:
+	return level % PER_WORLD == 0
+
+# --- prototype lab ----------------------------------------------------------
+# Alternative core loops to compare side by side. "" = the main campaign.
+var current_mode := ""
+
+const MODES := ["classic", "net", "lamps", "linked"]
+const MODE_TITLES := {
+	"classic": "CLASSIC",
+	"net": "NET + WRAP",
+	"lamps": "LAMPS",
+	"linked": "LINKED",
+}
+const MODE_RULES := {
+	"classic": "Match every connector",
+	"net": "Edges wrap · one network · no loops",
+	"lamps": "Power every lamp · open ends are fine",
+	"linked": "Chained tiles turn together",
+}
+# Per mode: [w, h, seed, extra] — extra is loop chance / lamp count / link count.
+const PROTO := {
+	"classic": [[4, 4, 11, 0.0], [4, 5, 12, 0.05], [5, 5, 13, 0.08], [5, 6, 14, 0.1],
+		[6, 6, 15, 0.1], [6, 7, 16, 0.12], [7, 7, 17, 0.12], [7, 8, 18, 0.14]],
+	# seeds picked so the loop-free solution is unique and local deduction alone
+	# cannot finish the board (tests re-check both)
+	"net": [[4, 4, 5003, 0], [4, 5, 5007, 0], [5, 5, 5009, 0], [5, 5, 5011, 0],
+		[5, 6, 5012, 0], [6, 6, 5015, 0], [6, 6, 5017, 0], [7, 7, 5018, 0]],
+	"lamps": [[5, 5, 31, 2], [5, 6, 32, 2], [6, 6, 33, 3], [6, 6, 34, 3],
+		[6, 7, 35, 4], [7, 7, 36, 4], [7, 8, 37, 5], [7, 8, 38, 5]],
+	"linked": [[4, 4, 41, 2], [4, 5, 42, 3], [5, 5, 43, 4], [5, 5, 44, 5],
+		[5, 6, 45, 6], [6, 6, 46, 7], [6, 6, 47, 8], [6, 7, 48, 9]],
+}
+
+func mode_title(mode: String) -> String:
+	return MODE_TITLES.get(mode, "FLUX")
+
+func mode_rule(mode: String) -> String:
+	return MODE_RULES.get(mode, "")
+
+func proto_count(mode: String) -> int:
+	return PROTO[mode].size()
+
+func get_proto_board(mode: String, level: int) -> Board:
+	var r: Array = PROTO[mode][level]
+	match mode:
+		"net":
+			return Generator.generate_net(int(r[0]), int(r[1]), int(r[2]))
+		"lamps":
+			return Generator.generate_lamps(int(r[0]), int(r[1]), int(r[2]), int(r[3]))
+		"linked":
+			return Generator.generate_linked(int(r[0]), int(r[1]), int(r[2]), int(r[3]), 0.06)
+	return Generator.generate(int(r[0]), int(r[1]), int(r[2]), float(r[3]))
+
+# Level count / board for whichever track is active.
+func active_count() -> int:
+	return count() if current_mode == "" else proto_count(current_mode)
+
+func active_board(level: int) -> Board:
+	return get_board(level) if current_mode == "" else get_proto_board(current_mode, level)
 
 # Build the board for a level (deterministic).
 func get_board(level: int) -> Board:
 	var c = configs[level]
 	return Generator.generate(int(c["w"]), int(c["h"]), int(c["seed"]), float(c["loop"]), int(c["holes"]), int(c["locked"]))
-
-var _par_cache := {}
-
-# Par = the TRUE minimum number of clockwise taps to solve the board (the move
-# economy's optimum), computed by the solver. Tiles rotate one way only, so this
-# is honest and achievable.
-func par(board: Board) -> int:
-	return Generator.optimal_moves(board)
-
-# Cached par per level (solver is deterministic, so par is fixed per level).
-func par_for(level: int) -> int:
-	if not _par_cache.has(level):
-		_par_cache[level] = par(get_board(level))
-	return int(_par_cache[level])
-
-# --- move budget / pressure ramp ------------------------------------------
-# World 1 is frictionless (no fail). Budget tightens toward near-miss by World 4.
-const WORLD_BUDGET_MULT := [0.0, 2.2, 1.6, 1.3]
-
-func world_no_fail(w: int) -> bool:
-	return w <= 0
-
-func budget_for(level: int) -> int:
-	var w := world_of(level)
-	if world_no_fail(w):
-		return 99999
-	var p := par_for(level)
-	var mult: float = WORLD_BUDGET_MULT[clampi(w, 0, WORLD_BUDGET_MULT.size() - 1)]
-	return max(int(ceil(p * mult)), p + 2)
-
-func level_no_fail(level: int) -> bool:
-	return world_no_fail(world_of(level))
-
-func stars_for(moves: int, par_value: int) -> int:
-	if par_value <= 0:
-		return 3
-	if moves <= par_value:
-		return 3
-	if moves <= int(ceil(par_value * 1.5)):
-		return 2
-	return 1
-
-# --- star-based progression ----------------------------------------------
-
-func best_stars(level: int) -> int:
-	if not Save.is_completed(level):
-		return 0
-	return stars_for(Save.best_moves(level), par(get_board(level)))
-
-func total_stars() -> int:
-	var t := 0
-	for i in range(count()):
-		t += best_stars(i)
-	return t
-
-func world_unlocked(w: int) -> bool:
-	return total_stars() >= gate_for_world(w)
-
-# A level is playable when the linear progression has reached it AND its world's
-# star gate is satisfied.
-func is_unlocked(level: int) -> bool:
-	if level < 0 or level >= count():
-		return false
-	if not Save.is_unlocked(level):
-		return false
-	return world_unlocked(world_of(level))
