@@ -1,0 +1,51 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Flux"
+config/description="A minimalist energy-circuit rotation puzzle."
+run/main_scene="res://scenes/Main.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+boot_splash/show_image=false
+config/icon="res://icon.svg"
+
+[autoload]
+
+Palette="*res://autoload/Palette.gd"
+Save="*res://autoload/Save.gd"
+Audio="*res://autoload/Audio.gd"
+Levels="*res://autoload/Levels.gd"
+Shot="*res://autoload/Shot.gd"
+
+[display]
+
+window/size/viewport_width=1080
+window/size/viewport_height=1920
+window/size/window_width_override=405
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[physics]
+
+common/enable_pause_aware_picking=true
+
+[rendering]
+
+renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_2d=1
+environment/defaults/default_clear_color=Color(0.055, 0.067, 0.11, 1)
