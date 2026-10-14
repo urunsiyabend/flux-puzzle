@@ -3,11 +3,9 @@ extends Control
 # Gameplay screen: HUD + board + controls + win overlay.
 
 var board_view: BoardView
-var _par := 0
-var _budget := 99999
-var _no_fail := true
 var _level := 0
-var _moves_label: Label
+var _title_label: Label
+var _world_label: Label
 var _overlay: Control
 
 func _ready() -> void:
@@ -29,7 +27,6 @@ func _ready() -> void:
 
 	board_view = BoardView.new()
 	add_child(board_view)
-	board_view.moved.connect(_on_moved)
 	board_view.solved.connect(_on_solved)
 
 	_build_hud()
@@ -47,12 +44,10 @@ func _relayout() -> void:
 
 func _load_level() -> void:
 	var board := Levels.get_board(_level)
-	_par = Levels.par_for(_level)
-	_budget = Levels.budget_for(_level)
-	_no_fail = Levels.level_no_fail(_level)
 	board_view.setup(board, _play_rect())
 	board_view.set_interactive(true)
-	_update_moves(0)
+	_title_label.text = "LEVEL %d" % (_level + 1)
+	_world_label.text = Levels.world_name(_level)
 	if _overlay:
 		_overlay.queue_free()
 		_overlay = null
@@ -77,9 +72,10 @@ func _build_hud() -> void:
 	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mid.alignment = BoxContainer.ALIGNMENT_CENTER
 	bar.add_child(mid)
-	mid.add_child(UI.label("LEVEL %d  ·  %s" % [_level + 1, Levels.world_name(_level)], Palette.FONT_BODY, Palette.TEXT))
-	_moves_label = UI.label("", Palette.FONT_SMALL, Palette.TEXT_DIM)
-	mid.add_child(_moves_label)
+	_title_label = UI.label("", Palette.FONT_BODY, Palette.TEXT)
+	mid.add_child(_title_label)
+	_world_label = UI.label("", Palette.FONT_SMALL, Palette.TEXT_DIM)
+	mid.add_child(_world_label)
 
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(110, 0)
@@ -119,76 +115,13 @@ func _control_button(glyph: String, caption: String) -> Button:
 	b.custom_minimum_size = Vector2(0, 120)
 	return b
 
-func _on_moved(count: int) -> void:
-	_update_moves(count)
-	# fail check: out of moves and not solved (solving move triggers win instead)
-	if not _no_fail and not board_view.board.is_solved() and count >= _budget:
-		_fail()
-
-func _update_moves(count: int) -> void:
-	var stars := Levels.stars_for(count, _par)
-	if _no_fail:
-		_moves_label.text = "moves %d  ·  par %d  ·  %s" % [count, _par, _star_str(stars)]
-	else:
-		var left: int = max(0, _budget - count)
-		var best := Save.best_moves(_level)
-		var best_txt := ("best %d" % best) if best >= 0 else "best —"
-		_moves_label.text = "%d moves left  ·  par %d  ·  %s  ·  %s" % [left, _par, best_txt, _star_str(stars)]
-
-func _fail() -> void:
-	board_view.set_interactive(false)
-	Audio.play("error")
-	_show_fail()
-
-func _show_fail() -> void:
-	_overlay = Control.new()
-	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(_overlay)
-	var dim := ColorRect.new()
-	dim.color = Color(0.03, 0.02, 0.04, 0.84)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_overlay.add_child(dim)
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_overlay.add_child(center)
-	var panel := VBoxContainer.new()
-	panel.alignment = BoxContainer.ALIGNMENT_CENTER
-	panel.add_theme_constant_override("separation", 26)
-	center.add_child(panel)
-	panel.add_child(UI.label("OUT OF MOVES", Palette.FONT_H1, Palette.DANGER))
-	panel.add_child(UI.label("so close — try again", Palette.FONT_BODY, Palette.TEXT_DIM))
-	var sp := Control.new(); sp.custom_minimum_size = Vector2(0, 20); panel.add_child(sp)
-	var retry := UI.primary_button("RETRY")
-	retry.custom_minimum_size = Vector2(420, 0)
-	retry.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	retry.pressed.connect(func(): _load_level())
-	panel.add_child(retry)
-	var menu := UI.ghost_button("LEVELS")
-	menu.custom_minimum_size = Vector2(420, 0)
-	menu.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	menu.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/LevelSelect.tscn"))
-	panel.add_child(menu)
-	panel.modulate.a = 0.0
-	var tw := create_tween()
-	tw.tween_property(panel, "modulate:a", 1.0, 0.3)
-
 func _on_solved() -> void:
 	board_view.set_interactive(false)
-	var moves := board_view.move_count
-	var stars := Levels.stars_for(moves, _par)
-	var total_before := Levels.total_stars()
-	Save.complete_level(_level, moves)
-	var total_after := Levels.total_stars()
-	# did this push total stars past a world gate?
-	var unlocked_world := -1
-	for w in range(Levels.WORLD_STAR_GATES.size()):
-		var g: int = Levels.WORLD_STAR_GATES[w]
-		if g > total_before and g <= total_after:
-			unlocked_world = w
+	Save.complete_level(_level, board_view.move_count)
 	await get_tree().create_timer(0.7).timeout
-	_show_win(moves, stars, unlocked_world)
+	_show_win()
 
-func _show_win(moves: int, stars: int, unlocked_world: int = -1) -> void:
+func _show_win() -> void:
 	_overlay = Control.new()
 	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(_overlay)
@@ -207,21 +140,23 @@ func _show_win(moves: int, stars: int, unlocked_world: int = -1) -> void:
 	panel.add_theme_constant_override("separation", 28)
 	center.add_child(panel)
 
-	var title := UI.label("SOLVED", Palette.FONT_TITLE, Palette.WIRE_ON)
-	panel.add_child(title)
-	panel.add_child(UI.label(_star_str(stars), 96, Palette.ACCENT_WARM))
-	panel.add_child(UI.label("%d moves  (par %d)" % [moves, _par], Palette.FONT_BODY, Palette.TEXT_DIM))
-	panel.add_child(UI.label("%d / %d total stars" % [Levels.total_stars(), Levels.count() * 3], Palette.FONT_SMALL, Palette.TEXT_DIM))
+	panel.add_child(UI.label("SOLVED", Palette.FONT_TITLE, Palette.WIRE_ON))
 
-	if unlocked_world >= 0:
-		panel.add_child(UI.label("WORLD UNLOCKED: %s" % Levels.WORLD_NAMES[unlocked_world], Palette.FONT_BODY, Palette.ACCENT_WARM))
+	var nxt_level := _level + 1
+	var has_next := nxt_level < Levels.count()
+	if has_next and Levels.is_world_start(nxt_level):
+		# entering a new world: name it and its one new idea, nothing else
+		var w := Levels.world_of(nxt_level)
+		panel.add_child(UI.label("NEXT · %s" % Levels.WORLD_NAMES[w].to_upper(), Palette.FONT_BODY, Palette.ACCENT_WARM))
+		panel.add_child(UI.label(Levels.world_intro(w), Palette.FONT_SMALL, Palette.TEXT_DIM))
+	elif not has_next:
+		panel.add_child(UI.label("All levels complete!", Palette.FONT_BODY, Palette.WIRE_GLOW))
 
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0, 30)
 	panel.add_child(spacer)
 
-	var has_next := _level + 1 < Levels.count()
-	if has_next and Levels.is_unlocked(_level + 1):
+	if has_next:
 		var nxt := UI.primary_button("NEXT")
 		nxt.custom_minimum_size = Vector2(420, 0)
 		nxt.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -230,12 +165,6 @@ func _show_win(moves: int, stars: int, unlocked_world: int = -1) -> void:
 			Levels.current_level = _level
 			_load_level())
 		panel.add_child(nxt)
-	elif has_next:
-		# next level is behind a star gate
-		var need: int = Levels.gate_for_world(Levels.world_of(_level + 1))
-		panel.add_child(UI.label("Next world needs %d★ (you have %d)" % [need, Levels.total_stars()], Palette.FONT_SMALL, Palette.ACCENT_WARM))
-	else:
-		panel.add_child(UI.label("All levels complete!", Palette.FONT_BODY, Palette.WIRE_GLOW))
 
 	var replay := UI.ghost_button("REPLAY")
 	replay.custom_minimum_size = Vector2(420, 0)
@@ -257,9 +186,3 @@ func _show_win(moves: int, stars: int, unlocked_world: int = -1) -> void:
 	var tw := create_tween().set_parallel(true)
 	tw.tween_property(panel, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_property(panel, "modulate:a", 1.0, 0.3)
-
-func _star_str(n: int) -> String:
-	var s := ""
-	for i in range(3):
-		s += "★" if i < n else "☆"
-	return s

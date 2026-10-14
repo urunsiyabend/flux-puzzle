@@ -60,10 +60,10 @@ func _ready() -> void:
 	root.add_child(UI.label("%d / %d solved" % [Save.data["completed"].size(), Levels.count()], Palette.FONT_SMALL, Palette.TEXT_DIM))
 
 func _on_play() -> void:
-	# resume at the furthest level that is actually unlocked (respects star gates)
+	# resume at the furthest level that is actually unlocked (linear progression)
 	var lvl := 0
 	for i in range(Levels.count()):
-		if Levels.is_unlocked(i):
+		if Save.is_unlocked(i):
 			lvl = i
 	Levels.current_level = lvl
 	get_tree().change_scene_to_file("res://scenes/Game.tscn")

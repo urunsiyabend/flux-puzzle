@@ -16,7 +16,7 @@ func _run(dir: String) -> void:
 	await _wait(0.9)
 	await _grab(dir + "/01_menu.png")
 
-	# World 2 level: locked tiles + move budget (down-counter)
+	# World 2 level: locked tiles
 	Levels.current_level = 9
 	get_tree().change_scene_to_file("res://scenes/Game.tscn")
 	await _wait(1.1)

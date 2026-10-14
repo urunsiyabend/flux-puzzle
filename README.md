@@ -27,7 +27,7 @@ autoload/
   Palette.gd             # single source of colours + type scale
   Save.gd                # JSON save: progress, best moves, settings
   Audio.gd               # 100% procedural SFX (synthesized to AudioStreamWAV)
-  Levels.gd              # 24-level catalogue + par / star logic
+  Levels.gd              # 24-level catalogue, worlds + their intros
   Shot.gd                # dev-only screenshot harness (inert unless FLUX_SHOT set)
 scripts/
   Puzzle.gd              # pure rules: direction bitmasks, rotation, opposite
@@ -56,17 +56,17 @@ tests/run_tests.gd       # headless test suite
 
 ### Difficulty curve
 
-24 levels, grids growing 3×3 → 8×11 with increasing loop density, split into three
-colour-coded tiers (easy / medium / hard). Star rating (★/★★/★★★) compares your
-move count to a computed *par* (minimum rotations back to the home solution).
+24 levels in four worlds, grids growing 3×3 → 8×10 with increasing loop density.
+Each world adds one mechanic (locked tiles, holes, then both). Progression is
+linear and there is no move limit, par or star rating — see `docs/DESIGN.md`.
 
 ## Features
 
-- Polished main menu, level select with lock state + earned stars, gameplay HUD
+- Polished main menu, level select with lock / solved state, minimal gameplay HUD
 - One-finger rotation, smooth per-tile rotation animation, energy flood feedback
 - Win detection + completion pulse + animated win panel
 - **Undo**, **Hint** (highlights a misaligned tile), **Restart**
-- Persistent save (progress, best moves, SFX setting)
+- Persistent save (progress, SFX setting)
 - Fully procedural audio and visuals — no external asset licensing
 
 ## Run it

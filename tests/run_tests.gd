@@ -25,7 +25,6 @@ func _initialize() -> void:
 	_test_holes()
 	_test_locked()
 	_test_move_economy()
-	_test_budget()
 	_test_hint()
 	_test_worlds()
 	_test_levels()
@@ -203,28 +202,6 @@ func _test_move_economy() -> void:
 		# solving the generated scramble by its own moves is possible in `opt`
 		_ok(_home(g).is_solved(), "home is a valid solution (seed %d)" % s)
 
-func _test_budget() -> void:
-	var L = preload("res://autoload/Levels.gd").new()
-	L._build_catalogue()
-	# World 1 is frictionless (no fail), later worlds can fail
-	_ok(L.level_no_fail(0), "world 1 is no-fail")
-	_ok(not L.level_no_fail(6), "world 2 can fail")
-	_ok(L.budget_for(0) >= 99999, "world 1 budget is effectively unlimited")
-	# fail-world budgets are finite and always allow a 3-star (>= par) clear
-	for lvl in [6, 12, 18]:
-		var p := L.par_for(lvl)
-		var bud := L.budget_for(lvl)
-		_ok(bud >= p, "budget allows an optimal clear (level %d: par %d, budget %d)" % [lvl + 1, p, bud])
-		_ok(bud < 99999, "fail-world budget is finite (level %d)" % [lvl + 1])
-	# multipliers tighten after world 1
-	var mult = L.WORLD_BUDGET_MULT
-	_ok(mult.size() == 4, "four budget multipliers")
-	_ok(mult[1] > mult[2] and mult[2] > mult[3], "budget tightens world over world")
-	# star thresholds
-	_ok(L.stars_for(0, 10) == 3, "par-or-better earns 3 stars")
-	_ok(L.stars_for(15, 10) == 2, "within 1.5x par earns 2 stars")
-	_ok(L.stars_for(16, 10) == 1, "beyond 1.5x par earns 1 star")
-
 func _test_hint() -> void:
 	# 3x1 line, all at home -> solved -> no hint
 	var b := Board.new(3, 1)
@@ -251,13 +228,9 @@ func _test_worlds() -> void:
 	_ok(L.world_of(6) == 1, "level 7 is world 1")
 	_ok(L.world_of(23) == 3, "level 24 is world 3")
 	_ok(L.WORLD_NAMES.size() == 4, "four world names")
-	var gates = L.WORLD_STAR_GATES
-	_ok(gates[0] == 0, "world 0 has no gate")
-	var increasing := true
-	for i in range(1, gates.size()):
-		if gates[i] <= gates[i - 1]:
-			increasing = false
-	_ok(increasing, "world star gates strictly increase")
+	_ok(L.WORLD_INTROS.size() == L.WORLD_NAMES.size(), "every world has a one-line intro")
+	_ok(L.is_world_start(0) and L.is_world_start(6), "levels 1 and 7 open a world")
+	_ok(not L.is_world_start(5), "level 6 does not open a world")
 	# every catalogue level still solvable with its mechanics
 	var all_ok := true
 	for i in range(L.count()):
@@ -299,9 +272,6 @@ func _test_levels() -> void:
 		if not home.is_solved():
 			all_solvable = false
 	_ok(all_solvable, "every catalogue level is solvable")
-	# star thresholds
-	_ok(L.stars_for(0, 10) == 3, "par-or-better earns 3 stars")
-	_ok(L.stars_for(100, 10) == 1, "far over par earns 1 star")
 
 func _test_progression() -> void:
 	var S = preload("res://autoload/Save.gd").new()
