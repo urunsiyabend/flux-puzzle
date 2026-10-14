@@ -100,6 +100,7 @@ func _make_chip(level: int) -> Control:
 		b.pressed.connect(func():
 			Audio.play("tap")
 			Levels.current_level = level
+			Levels.current_mode = ""
 			get_tree().change_scene_to_file("res://scenes/Game.tscn"))
 	else:
 		v.add_child(UI.label("🔒", Palette.FONT_H1, Palette.TEXT_DIM))

@@ -29,6 +29,10 @@ func _initialize() -> void:
 	_test_worlds()
 	_test_levels()
 	_test_progression()
+	_test_rules()
+	_test_proto_net()
+	_test_proto_lamps()
+	_test_proto_linked()
 	print("== done: %d passed, %d failed ==" % [_pass, _fail])
 	quit(1 if _fail > 0 else 0)
 
@@ -285,3 +289,83 @@ func _test_progression() -> void:
 	_ok(S.best_moves(0) == 12, "best moves keeps the minimum")
 	S.complete_level(0, 8)
 	_ok(S.best_moves(0) == 8, "best moves updates to a better score")
+
+func _test_rules() -> void:
+	# wrap: stepping off an edge lands on the opposite side
+	var b := Board.new(3, 3)
+	_ok(b.step(0, Puzzle.W) == -1, "bounded board: no neighbour off the edge")
+	b.wrap = true
+	_ok(b.step(0, Puzzle.W) == 2, "wrap: west of col 0 is the last column")
+	_ok(b.step(0, Puzzle.N) == 6, "wrap: north of row 0 is the last row")
+	# NET rule: a closed 2x2 ring is matched but not a valid network
+	var ring := Board.new(2, 2)
+	ring.base[0] = Puzzle.E | Puzzle.S
+	ring.base[1] = Puzzle.W | Puzzle.S
+	ring.base[2] = Puzzle.N | Puzzle.E
+	ring.base[3] = Puzzle.N | Puzzle.W
+	_ok(ring.is_solved(), "ring satisfies the classic matching rule")
+	ring.rule = Board.RULE_NET
+	_ok(not ring.is_solved(), "ring fails the NET rule (closed loop)")
+	var loops := ring.loop_cells()
+	_ok(loops[0] == 1 and loops[3] == 1, "loop cells are reported for feedback")
+	# breaking the ring into a path makes a valid tree
+	ring.base[1] = Puzzle.W
+	ring.base[3] = Puzzle.W
+	ring.base[2] = Puzzle.N | Puzzle.E
+	_ok(ring.is_solved(), "loop-free connected path passes the NET rule")
+	_ok(ring.loop_cells()[0] == 0, "no loop cells on a tree")
+
+func _test_proto_net() -> void:
+	var L = preload("res://autoload/Levels.gd").new()
+	L._build_catalogue()
+	for lvl in range(L.proto_count("net")):
+		var b: Board = L.get_proto_board("net", lvl)
+		_ok(b.wrap and b.rule == Board.RULE_NET, "net %d: wrapping NET board" % [lvl + 1])
+		_ok(not b.is_solved(), "net %d: starts unsolved" % [lvl + 1])
+		_ok(_home(b).is_solved(), "net %d: home orientation solves it" % [lvl + 1])
+		_ok(Generator.count_solutions(b, 2) == 1, "net %d: unique solution" % [lvl + 1])
+		_ok(Generator.local_solved_ratio(b) < 1.0, "net %d: local deduction alone cannot finish" % [lvl + 1])
+
+func _test_proto_lamps() -> void:
+	var L = preload("res://autoload/Levels.gd").new()
+	L._build_catalogue()
+	for lvl in range(L.proto_count("lamps")):
+		var b: Board = L.get_proto_board("lamps", lvl)
+		var lamps := 0
+		var decoys := 0
+		for i in range(b.lamp.size()):
+			lamps += b.lamp[i]
+			decoys += 1 - b.need[i]
+		_ok(lamps >= 1, "lamps %d: has lamps" % [lvl + 1])
+		_ok(decoys > 0, "lamps %d: has decoy tiles" % [lvl + 1])
+		_ok(not b.is_solved(), "lamps %d: starts unsolved" % [lvl + 1])
+		var h := Board.from_dict(b.to_dict())
+		for i in range(h.rot.size()):
+			if h.need[i] == 1:
+				h.rot[i] = 0
+		_ok(h.is_solved(), "lamps %d: the route tiles at home power every lamp" % [lvl + 1])
+
+func _test_proto_linked() -> void:
+	var L = preload("res://autoload/Levels.gd").new()
+	L._build_catalogue()
+	for lvl in range(L.proto_count("linked")):
+		var b: Board = L.get_proto_board("linked", lvl)
+		_ok(b.has_links(), "linked %d: has chained tiles" % [lvl + 1])
+		var sym := true
+		for i in range(b.links.size()):
+			for j in b.links[i]:
+				if not b.links[j].has(i):
+					sym = false
+		_ok(sym, "linked %d: links are symmetric" % [lvl + 1])
+		_ok(not b.is_solved(), "linked %d: starts unsolved" % [lvl + 1])
+		# tap/untap are exact inverses
+		var before := b.rot.duplicate()
+		b.tap(0)
+		b.untap(0)
+		_ok(b.rot == before, "linked %d: untap restores the board" % [lvl + 1])
+		# replaying the inverse taps solves it, and the hint follows that plan
+		var guard := 0
+		while b.hint_cell() >= 0 and guard < 400:
+			b.tap(b.hint_cell())
+			guard += 1
+		_ok(b.is_solved(), "linked %d: following hints solves the board" % [lvl + 1])

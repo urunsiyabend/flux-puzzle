@@ -43,11 +43,15 @@ func _relayout() -> void:
 		board_view.refit(_play_rect())
 
 func _load_level() -> void:
-	var board := Levels.get_board(_level)
+	var board := Levels.active_board(_level)
 	board_view.setup(board, _play_rect())
 	board_view.set_interactive(true)
-	_title_label.text = "LEVEL %d" % (_level + 1)
-	_world_label.text = Levels.world_name(_level)
+	if _proto():
+		_title_label.text = "%s · %d" % [Levels.mode_title(Levels.current_mode), _level + 1]
+		_world_label.text = Levels.mode_rule(Levels.current_mode)
+	else:
+		_title_label.text = "LEVEL %d" % (_level + 1)
+		_world_label.text = Levels.world_name(_level)
 	if _overlay:
 		_overlay.queue_free()
 		_overlay = null
@@ -65,7 +69,7 @@ func _build_hud() -> void:
 	add_child(bar)
 
 	var back := UI.icon_button("<")
-	back.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/LevelSelect.tscn"))
+	back.pressed.connect(_to_levels)
 	bar.add_child(back)
 
 	var mid := VBoxContainer.new()
@@ -77,9 +81,15 @@ func _build_hud() -> void:
 	_world_label = UI.label("", Palette.FONT_SMALL, Palette.TEXT_DIM)
 	mid.add_child(_world_label)
 
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(110, 0)
-	bar.add_child(spacer)
+	if _proto():
+		# prototype lab: jump to the same level in the next core loop
+		var swap := UI.icon_button("⇄")
+		swap.pressed.connect(_next_mode)
+		bar.add_child(swap)
+	else:
+		var spacer := Control.new()
+		spacer.custom_minimum_size = Vector2(110, 0)
+		bar.add_child(spacer)
 
 func _build_controls() -> void:
 	var bar := HBoxContainer.new()
@@ -117,7 +127,10 @@ func _control_button(glyph: String, caption: String) -> Button:
 
 func _on_solved() -> void:
 	board_view.set_interactive(false)
-	Save.complete_level(_level, board_view.move_count)
+	if _proto():
+		Save.complete_proto(Levels.current_mode, _level, board_view.move_count)
+	else:
+		Save.complete_level(_level, board_view.move_count)
 	await get_tree().create_timer(0.7).timeout
 	_show_win()
 
@@ -143,8 +156,8 @@ func _show_win() -> void:
 	panel.add_child(UI.label("SOLVED", Palette.FONT_TITLE, Palette.WIRE_ON))
 
 	var nxt_level := _level + 1
-	var has_next := nxt_level < Levels.count()
-	if has_next and Levels.is_world_start(nxt_level):
+	var has_next := nxt_level < Levels.active_count()
+	if has_next and not _proto() and Levels.is_world_start(nxt_level):
 		# entering a new world: name it and its one new idea, nothing else
 		var w := Levels.world_of(nxt_level)
 		panel.add_child(UI.label("NEXT · %s" % Levels.WORLD_NAMES[w].to_upper(), Palette.FONT_BODY, Palette.ACCENT_WARM))
@@ -175,7 +188,7 @@ func _show_win() -> void:
 	var menu := UI.ghost_button("LEVELS")
 	menu.custom_minimum_size = Vector2(420, 0)
 	menu.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	menu.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/LevelSelect.tscn"))
+	menu.pressed.connect(_to_levels)
 	panel.add_child(menu)
 
 	# pop-in animation (scale from the panel's own centre)
@@ -186,3 +199,17 @@ func _show_win() -> void:
 	var tw := create_tween().set_parallel(true)
 	tw.tween_property(panel, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_property(panel, "modulate:a", 1.0, 0.3)
+
+func _proto() -> bool:
+	return Levels.current_mode != ""
+
+func _to_levels() -> void:
+	var scene := "res://scenes/Lab.tscn" if _proto() else "res://scenes/LevelSelect.tscn"
+	get_tree().change_scene_to_file(scene)
+
+func _next_mode() -> void:
+	var modes: Array = Levels.MODES
+	Levels.current_mode = modes[(modes.find(Levels.current_mode) + 1) % modes.size()]
+	_level = mini(_level, Levels.active_count() - 1)
+	Levels.current_level = _level
+	_load_level()

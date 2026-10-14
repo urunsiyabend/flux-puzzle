@@ -49,6 +49,21 @@ func _run(dir: String) -> void:
 	await _wait(0.9)
 	await _grab(dir + "/04_levels.png")
 
+	# prototype lab: the mode list, then one level of each core loop
+	get_tree().change_scene_to_file("res://scenes/Lab.tscn")
+	await _wait(0.9)
+	await _grab(dir + "/09_lab.png")
+	for mode in ["net", "lamps", "linked"]:
+		Levels.current_mode = mode
+		Levels.current_level = 2
+		get_tree().change_scene_to_file("res://scenes/Game.tscn")
+		await _wait(1.1)
+		if mode == "linked":
+			_tap_test()
+			await _wait(0.4)
+		await _grab(dir + "/10_proto_%s.png" % mode)
+	Levels.current_mode = ""
+
 	get_tree().quit()
 
 func _wait(s: float) -> void:

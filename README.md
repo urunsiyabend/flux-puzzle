@@ -37,7 +37,8 @@ scripts/
   BoardView.gd           # single-pass _draw() renderer, touch input, animation,
                          #   energy flood-fill from the source
   UI.gd / Backdrop.gd    # shared neon button/label factory + animated background
-  Main.gd / LevelSelect.gd / Game.gd   # the three screens
+  Main.gd / LevelSelect.gd / Game.gd   # the main screens
+  Lab.gd                 # prototype lab: alternative core loops
 scenes/
   Main.tscn / LevelSelect.tscn / Game.tscn
 tests/run_tests.gd       # headless test suite
@@ -66,6 +67,7 @@ linear and there is no move limit, par or star rating — see `docs/DESIGN.md`.
 - One-finger rotation, smooth per-tile rotation animation, energy flood feedback
 - Win detection + completion pulse + animated win panel
 - **Undo**, **Hint** (highlights a misaligned tile), **Restart**
+- **Prototype lab**: Classic / Net + Wrap / Lamps / Linked core loops, switchable in game (see `docs/DESIGN.md`)
 - Persistent save (progress, SFX setting)
 - Fully procedural audio and visuals — no external asset licensing
 

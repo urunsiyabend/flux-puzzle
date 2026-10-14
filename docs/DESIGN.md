@@ -47,3 +47,20 @@ read `9 moves left · par 14 · best 17 · ★★☆`.
 - Everything seeded; restart reproduces the identical puzzle.
 - Tests cover rules, generation/solvability, holes, locked tiles, the solver,
   hints, world structure and save progression.
+
+## Prototype lab (core-loop exploration)
+Main menu → **PROTOTYPES**. Four core loops, 8 open levels each, with a ⇄ button
+in the HUD that jumps to the same level in the next mode for quick A/B play.
+
+| Mode | Rule | What it tests |
+|------|------|---------------|
+| Classic | Match every connector (current game) | Baseline |
+| Net + Wrap | Edges wrap around; one network; no closed loops (loops tint red) | Global deduction: islands, loop avoidance |
+| Lamps | Power every lamp from the source; open ends allowed; decoy tiles | Route finding instead of filling the board |
+| Linked | Classic rule, but chained tiles turn together | Planning the tap order (Lights-Out style) |
+
+Measured with `Generator.local_solved_ratio` (local arc-consistency only):
+all 24 campaign levels are 100% solvable by local deduction, and so is any
+bounded random board, with or without the Net rule. Wrapping removes the edge
+anchors: on the Net + Wrap levels local deduction pins 0% of tiles, and every
+level is checked to have a unique loop-free solution (`Generator.count_solutions`).

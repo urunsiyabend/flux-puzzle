@@ -349,3 +349,304 @@ static func _bnb(i: int, w: int, h: int, domain: Array, assign: PackedInt32Array
 		if ok:
 			assign[i] = m
 			_bnb(i + 1, w, h, domain, assign, cost + int(opt[1]), best, nodes, node_cap)
+
+# ---------------------------------------------------------------------------
+# Prototype modes. Each builds a home solution first, then scrambles it, so
+# every board is solvable by construction.
+# ---------------------------------------------------------------------------
+
+# Random DFS spanning tree over active cells, honouring wrap via Board.step.
+static func _spanning_tree(b: Board, rng: RandomNumberGenerator, start: int) -> void:
+	var visited := {}
+	for i in range(b.base.size()):
+		if b.active[i] == 0:
+			visited[i] = true
+	var stack: Array[int] = [start]
+	visited[start] = true
+	while not stack.is_empty():
+		var cur: int = stack[stack.size() - 1]
+		var opts: Array = []
+		for dir in Puzzle.DIRS:
+			var ni := b.step(cur, dir)
+			if ni >= 0 and ni != cur and not visited.has(ni):
+				opts.append([dir, ni])
+		if opts.is_empty():
+			stack.pop_back()
+			continue
+		var pick: Array = opts[rng.randi_range(0, opts.size() - 1)]
+		b.base[cur] = b.base[cur] | int(pick[0])
+		b.base[pick[1]] = b.base[pick[1]] | Puzzle.opposite(pick[0])
+		visited[pick[1]] = true
+		stack.append(pick[1])
+
+# Randomized Prim: grows outward from `start`, so routes stay short and bushy
+# (a DFS tree would snake through nearly every cell).
+static func _bushy_tree(b: Board, rng: RandomNumberGenerator, start: int) -> void:
+	var inside := {start: true}
+	var frontier: Array = []
+	for dir in Puzzle.DIRS:
+		var ni := b.step(start, dir)
+		if ni >= 0:
+			frontier.append([start, dir, ni])
+	while not frontier.is_empty():
+		var k := rng.randi_range(0, frontier.size() - 1)
+		var e: Array = frontier[k]
+		frontier[k] = frontier[frontier.size() - 1]
+		frontier.pop_back()
+		var ni: int = e[2]
+		if inside.has(ni):
+			continue
+		inside[ni] = true
+		b.base[e[0]] = b.base[e[0]] | int(e[1])
+		b.base[ni] = b.base[ni] | Puzzle.opposite(e[1])
+		for dir in Puzzle.DIRS:
+			var nn := b.step(ni, dir)
+			if nn >= 0 and not inside.has(nn):
+				frontier.append([ni, dir, nn])
+
+static func _central_hub(b: Board) -> int:
+	var best := -1
+	var best_score := -INF
+	var cx := (b.width - 1) / 2.0
+	var cy := (b.height - 1) / 2.0
+	for i in range(b.base.size()):
+		if b.base[i] == 0 or b.active[i] == 0:
+			continue
+		@warning_ignore("integer_division")
+		var dist: float = abs(i % b.width - cx) + abs(i / b.width - cy)
+		var score: float = Puzzle.popcount(b.base[i]) * 10.0 - dist
+		if score > best_score:
+			best_score = score
+			best = i
+	return best
+
+# NET + WRAP: edges wrap around, and the solution must be one loop-free
+# network. Removes the border "anchors" that make classic boards trivial.
+static func generate_net(w: int, h: int, gen_seed: int) -> Board:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = gen_seed
+	var b := Board.new(w, h)
+	b.wrap = true
+	b.rule = Board.RULE_NET
+	_spanning_tree(b, rng, rng.randi_range(0, w * h - 1))
+	_scramble(b, rng)
+	b.source = _central_hub(b)
+	return b
+
+# LAMPS: power every lamp from the source. Only the source->lamp routes are
+# part of the solution; the other cells are decoys and open ends are allowed.
+static func generate_lamps(w: int, h: int, gen_seed: int, lamp_count: int) -> Board:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = gen_seed
+	var b := Board.new(w, h)
+	b.rule = Board.RULE_LAMPS
+	@warning_ignore("integer_division")
+	var src := (h / 2) * w + w / 2
+	# full spanning tree rooted at the source, remembered as parent links
+	var tree := Board.new(w, h)
+	_bushy_tree(tree, rng, src)
+	var parent := {src: -1}
+	var stack: Array[int] = [src]
+	while not stack.is_empty():
+		var cur: int = stack.pop_back()
+		for dir in Puzzle.DIRS:
+			if tree.base[cur] & dir:
+				var ni := tree.step(cur, dir)
+				if not parent.has(ni):
+					parent[ni] = cur
+					stack.append(ni)
+	# lamps: the tree's leaves farthest from the source, spread out
+	var leaves: Array = []
+	for i in range(w * h):
+		if i != src and Puzzle.popcount(tree.base[i]) == 1:
+			leaves.append(i)
+	for i in range(leaves.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var t = leaves[i]; leaves[i] = leaves[j]; leaves[j] = t
+	var lamps: Array = []
+	for c in leaves:
+		var far := true
+		for l in lamps:
+			if abs(int(c) % w - int(l) % w) + abs(int(c) / w - int(l) / w) < 3:
+				far = false
+		if far and abs(int(c) % w - src % w) + abs(int(c) / w - src / w) >= 2:
+			lamps.append(c)
+		if lamps.size() >= lamp_count:
+			break
+	if lamps.is_empty():
+		lamps.append(leaves[0])
+	# keep only the source->lamp paths as the solution
+	var on_path := {src: true}
+	for l in lamps:
+		var c: int = l
+		while c != -1 and c != src:
+			on_path[c] = true
+			var p: int = parent[c]
+			for dir in Puzzle.DIRS:
+				if tree.step(c, dir) == p:
+					b.base[c] = b.base[c] | dir
+					b.base[p] = b.base[p] | Puzzle.opposite(dir)
+			c = p
+	for l in lamps:
+		b.lamp[l] = 1
+	b.source = src
+	# decoys fill the rest: plausible pieces that are not part of any route
+	var shapes := [Puzzle.N | Puzzle.S, Puzzle.N | Puzzle.E, Puzzle.N | Puzzle.E | Puzzle.S, Puzzle.N]
+	for i in range(w * h):
+		if not on_path.has(i):
+			b.need[i] = 0
+			b.base[i] = shapes[rng.randi_range(0, shapes.size() - 1)]
+	for i in range(w * h):
+		b.rot[i] = rng.randi_range(0, 3)
+	# never start solved: knock a lamp's route off its home orientation
+	var guard := 0
+	while b.is_solved() and guard < 32:
+		guard += 1
+		var l: int = lamps[rng.randi_range(0, lamps.size() - 1)]
+		b.rot[l] = (b.rot[l] + 1) % 4
+	return b
+
+# LINKED: classic rules, but pairs of tiles are chained so a tap turns its
+# partners too. The puzzle becomes finding the right taps, not the targets.
+static func generate_linked(w: int, h: int, gen_seed: int, link_count: int, loop_chance: float = 0.0) -> Board:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = gen_seed
+	var b := generate(w, h, gen_seed, loop_chance)
+	for i in range(b.rot.size()):
+		b.rot[i] = 0
+	var movable := _movable_tiles(b)
+	var is_movable := {}
+	for i in movable:
+		is_movable[i] = true
+	# chain adjacent movable tiles; each tile joins at most two links
+	var made := 0
+	var attempts := link_count * 30
+	while made < link_count and attempts > 0:
+		attempts -= 1
+		var a: int = movable[rng.randi_range(0, movable.size() - 1)]
+		var dir: int = Puzzle.DIRS[rng.randi_range(0, 3)]
+		var c := b.step(a, dir)
+		if c < 0 or not is_movable.has(c) or b.links[a].has(c):
+			continue
+		if b.links[a].size() >= 2 or b.links[c].size() >= 2:
+			continue
+		b.links[a].append(c)
+		b.links[c].append(a)
+		made += 1
+	# scramble by tapping: replaying the inverse taps always solves it
+	for i in movable:
+		var k := rng.randi_range(0, 3)
+		b.gen_taps[i] = k
+		for _t in range(k):
+			b.tap(i)
+	for i in range(b.taps.size()):
+		b.taps[i] = 0
+	if b.is_solved() and not movable.is_empty():
+		var t: int = movable[0]
+		b.tap(t)
+		b.gen_taps[t] += 1
+		b.taps[t] = 0
+	return b
+
+# ---------------------------------------------------------------------------
+# Deduction: local arc-consistency. A tile keeps only orientations that every
+# neighbour can agree with. Returns the remaining options per cell; a board is
+# "locally solvable" when every movable cell ends with exactly one option.
+# ---------------------------------------------------------------------------
+static func _domains(b: Board) -> Array:
+	var dom: Array = []
+	for i in range(b.base.size()):
+		if b.active[i] == 0:
+			dom.append([0])
+		elif b.locked[i] == 1:
+			dom.append([b.current_mask(i)])
+		else:
+			var opts: Array = []
+			for m in _distinct_rotations(b.base[i]):
+				var ok := true
+				for dir in Puzzle.DIRS:
+					if (m & dir) and b.step(i, dir) < 0:
+						ok = false
+				if ok:
+					opts.append(m)
+			dom.append(opts)
+	return dom
+
+static func _propagate(b: Board, dom: Array) -> bool:
+	var changed := true
+	while changed:
+		changed = false
+		for i in range(dom.size()):
+			var keep: Array = []
+			for m in dom[i]:
+				var ok := true
+				for dir in Puzzle.DIRS:
+					var ni := b.step(i, dir)
+					if ni < 0:
+						continue
+					var want: bool = (m & dir) != 0
+					var opp := Puzzle.opposite(dir)
+					var any := false
+					for nm in dom[ni]:
+						if ((nm & opp) != 0) == want:
+							any = true
+							break
+					if not any:
+						ok = false
+						break
+				if ok:
+					keep.append(m)
+			if keep.size() < dom[i].size():
+				dom[i] = keep
+				changed = true
+				if keep.is_empty():
+					return false
+	return true
+
+# Fraction (0..1) of movable cells pinned by local deduction alone.
+static func local_solved_ratio(b: Board) -> float:
+	var dom := _domains(b)
+	_propagate(b, dom)
+	var movable := 0
+	var pinned := 0
+	for i in range(dom.size()):
+		if b.active[i] == 1 and b.locked[i] == 0 and _distinct_rotations(b.base[i]).size() > 1:
+			movable += 1
+			if dom[i].size() == 1:
+				pinned += 1
+	return 1.0 if movable == 0 else float(pinned) / movable
+
+# Count solutions under the board's own rule (MATCH or NET), up to `cap`.
+static func count_solutions(b: Board, cap: int = 2) -> int:
+	var dom := _domains(b)
+	var found := [0]
+	_search(b, dom, found, cap)
+	return found[0]
+
+static func _search(b: Board, dom: Array, found: Array, cap: int) -> void:
+	if found[0] >= cap:
+		return
+	if not _propagate(b, dom):
+		return
+	var pick := -1
+	for i in range(dom.size()):
+		if dom[i].size() > 1 and (pick < 0 or dom[i].size() < dom[pick].size()):
+			pick = i
+	if pick < 0:
+		if b.rule != Board.RULE_NET or _assignment_is_tree(b, dom):
+			found[0] += 1
+		return
+	for m in dom[pick]:
+		var d2: Array = []
+		for opts in dom:
+			d2.append(opts.duplicate())
+		d2[pick] = [m]
+		_search(b, d2, found, cap)
+
+static func _assignment_is_tree(b: Board, dom: Array) -> bool:
+	var probe := Board.new(b.width, b.height)
+	probe.wrap = b.wrap
+	probe.active = b.active
+	for i in range(dom.size()):
+		probe.base[i] = dom[i][0]
+	return probe._is_tree()
